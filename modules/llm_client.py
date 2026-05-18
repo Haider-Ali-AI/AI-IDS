@@ -33,6 +33,7 @@ from dataclasses import dataclass, asdict
 
 from google import genai
 from google.genai import types
+from groq import AsyncGroq
 
 from modules.triage import TriagedPacket
 from config import settings
@@ -129,6 +130,15 @@ class LLMAnalyzer:
             max_output_tokens=1024,
             system_instruction=SYSTEM_PROMPT,
         )
+
+        # Initialize Groq client (as fallback)
+        self.groq_client = None
+        if settings.groq_api_key:
+            self.groq_client = AsyncGroq(api_key=settings.groq_api_key)
+            self.groq_model = settings.groq_model
+            logger.info(f"Groq fallback client initialized with model: {self.groq_model}")
+        else:
+            logger.warning("Groq API key not provided - no fallback LLM available")
 
         # Threading
         self._thread: Optional[threading.Thread] = None
@@ -309,8 +319,8 @@ class LLMAnalyzer:
                 except Exception as e:
                     logger.debug(f"RAG query failed (non-critical): {e}")
 
-            # Step 4: Send to Gemini with retries
-            analysis = await self._call_gemini_with_retry(prompt)
+            # Step 4: Send to LLMs with fallback logic
+            analysis = await self._call_llm_with_fallback(prompt)
 
             # Step 5: Store results
             if analysis and alert_id and self.db_manager:
@@ -356,6 +366,23 @@ class LLMAnalyzer:
             if alert_id and self.db_manager:
                 await self.db_manager.mark_alert_error(alert_id, str(e))
 
+    async def _call_llm_with_fallback(self, prompt: str) -> Optional[ThreatAnalysis]:
+        """
+        Orchestrate LLM analysis with fallback logic.
+        Tries Gemini first, then switches to Groq if Gemini fails.
+        """
+        # 1. Try Gemini first
+        analysis = await self._call_gemini_with_retry(prompt)
+        if analysis:
+            return analysis
+
+        # 2. Case: Gemini failed after all retries (or rate limited)
+        if self.groq_client:
+            logger.warning("Switching to Groq fallback LLM...")
+            return await self._call_groq_fallback(prompt)
+        
+        return None
+
     async def _call_gemini_with_retry(
         self,
         prompt: str,
@@ -363,21 +390,12 @@ class LLMAnalyzer:
     ) -> Optional[ThreatAnalysis]:
         """
         Call Gemini API with exponential backoff retry logic.
-        
-        Uses the new google.genai async client for non-blocking calls.
-        
-        Args:
-            prompt: The formatted analysis prompt.
-            max_retries: Maximum retry attempts (defaults to config).
-            
-        Returns:
-            ThreatAnalysis object if successful, None on failure.
         """
         max_retries = max_retries or settings.gemini_max_retries
 
         for attempt in range(max_retries):
             try:
-                # Use the async client (client.aio.models.generate_content)
+                # Use the async client
                 response = await asyncio.get_event_loop().run_in_executor(
                     None,
                     lambda: self.client.models.generate_content(
@@ -388,23 +406,56 @@ class LLMAnalyzer:
                 )
 
                 if not response or not response.text:
-                    logger.warning(f"Empty Gemini response (attempt {attempt + 1})")
                     continue
 
-                # Parse the JSON response
                 analysis = self._parse_response(response.text)
                 if analysis:
                     return analysis
 
             except Exception as e:
-                wait_time = (2 ** attempt) * 1.0  # 1s, 2s, 4s
-                logger.warning(
-                    f"Gemini API error (attempt {attempt + 1}/{max_retries}): {e}. "
-                    f"Retrying in {wait_time}s..."
-                )
-                await asyncio.sleep(wait_time)
+                # If we hit a rate limit (429), don't waste all retries, 
+                # let logic flow back to Groq quickly if retries won't help soon
+                if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
+                    logger.error(f"Gemini Rate Limit (429) hit on attempt {attempt + 1}")
+                    if attempt < max_retries - 1:
+                        wait = (2 ** attempt) * 2.0
+                        await asyncio.sleep(wait)
+                        continue
+                
+                logger.warning(f"Gemini attempt {attempt + 1} failed: {e}")
+                await asyncio.sleep(1.0)
 
-        logger.error(f"All {max_retries} Gemini attempts failed")
+        return None
+
+    async def _call_groq_fallback(self, prompt: str) -> Optional[ThreatAnalysis]:
+        """
+        Execute fallback analysis using Groq (Llama-3).
+        """
+        try:
+            # Groq chat format
+            messages = [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": prompt}
+            ]
+
+            response = await self.groq_client.chat.completions.create(
+                model=self.groq_model,
+                messages=messages,
+                temperature=0.2,
+                max_tokens=1024,
+                response_format={"type": "json_object"}
+            )
+
+            if response and response.choices:
+                text = response.choices[0].message.content
+                analysis = self._parse_response(text)
+                if analysis:
+                    logger.info("Successfully analyzed via Groq fallback")
+                    return analysis
+
+        except Exception as e:
+            logger.error(f"Groq fallback failed: {e}")
+        
         return None
 
     # ── Prompt Engineering ───────────────────────────────────────────────

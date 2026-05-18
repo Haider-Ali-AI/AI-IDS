@@ -11,7 +11,7 @@
 
 from pydantic_settings import BaseSettings
 from pydantic import Field
-from typing import List, Set
+from typing import List, Set, Optional
 import os
 
 
@@ -87,6 +87,16 @@ class Settings(BaseSettings):
     gemini_max_retries: int = Field(
         default=3,
         description="Max retries for failed Gemini API calls"
+    )
+
+    # ── Groq API (Fallback) ──────────────────────────────────────────────
+    groq_api_key: Optional[str] = Field(
+        default=None,
+        description="Groq API key for LLM fallback support"
+    )
+    groq_model: str = Field(
+        default="llama-3.3-70b-versatile",
+        description="Groq model to use as fallback"
     )
 
     # ── Network Sniffing ─────────────────────────────────────────────────

@@ -9,8 +9,9 @@ uvicorn[standard]>=0.29.0
 # ── Packet Capture ───────────────────────────────────────────────────────────
 scapy>=2.5.0
 
-# ── LLM Integration (Google Gemini) ─────────────────────────────────────────
+# ── LLM Integration (Google Gemini & Groq) ───────────────────────────────────
 google-genai>=1.0.0
+groq>=0.11.0
 
 # ── Data Validation ──────────────────────────────────────────────────────────
 pydantic>=2.6.0
