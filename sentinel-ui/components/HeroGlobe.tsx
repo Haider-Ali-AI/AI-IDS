@@ -69,12 +69,6 @@ export default function HeroGlobe() {
       globeEl.current.controls().enableZoom = false;
       // Position the camera slightly further back
       globeEl.current.pointOfView({ altitude: 2.2 }, 0);
-      
-      // Apply neon cyber theme to the globe material
-      const globeMaterial = globeEl.current.globeMaterial();
-      globeMaterial.color = new THREE.Color("#00122a");
-      globeMaterial.emissive = new THREE.Color("#00d4ff");
-      globeMaterial.emissiveIntensity = 0.15;
     }
   }, [globeEl.current, dimensions.width]);
 
@@ -125,6 +119,22 @@ export default function HeroGlobe() {
           // Neon Glow Atmosphere
           atmosphereColor="#00d4ff"
           atmosphereAltitude={0.2}
+
+          // Safely apply material tinting after globe is loaded
+          onGlobeReady={() => {
+            try {
+              if (globeEl.current) {
+                const globeMaterial = globeEl.current.globeMaterial();
+                if (globeMaterial) {
+                  globeMaterial.color = new THREE.Color("#00122a");
+                  globeMaterial.emissive = new THREE.Color("#00d4ff");
+                  globeMaterial.emissiveIntensity = 0.15;
+                }
+              }
+            } catch (e) {
+              console.error(e);
+            }
+          }}
 
           // Attackers & User points
           pointsData={pointsData}
