@@ -161,11 +161,17 @@ class PacketSniffer:
         self._packets_dropped = 0
 
         # Configure AsyncSniffer
+        from scapy.all import get_if_list
+        valid_ifaces = get_if_list()
+        actual_iface = self.interface if self.interface in valid_ifaces else None
+        
         sniffer_kwargs = {
             "prn": self._packet_callback,
-            "store": False,                    # Don't store packets in memory
-            "iface": self.interface,
+            "store": False,
         }
+        if actual_iface:
+            sniffer_kwargs["iface"] = actual_iface
+
         if self.bpf_filter:
             sniffer_kwargs["filter"] = self.bpf_filter
 

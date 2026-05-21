@@ -109,12 +109,12 @@ class ARIAAgent:
             for msg in history:
                 role = "user" if msg["role"] == "user" else "model"
                 contents.append(
-                    types.Content(role=role, parts=[types.Part.from_text(msg["content"])])
+                    types.Content(role=role, parts=[types.Part.from_text(text=msg["content"])])
                 )
                 
             # Add the current message
             contents.append(
-                types.Content(role="user", parts=[types.Part.from_text(message)])
+                types.Content(role="user", parts=[types.Part.from_text(text=message)])
             )
             
             config = types.GenerateContentConfig(
@@ -122,9 +122,14 @@ class ARIAAgent:
                 temperature=0.3,
             )
 
+        # If we previously hit the Gemini rate limit, jump straight to Groq
+        if getattr(settings, "gemini_exhausted", False) and settings.groq_api_key:
+            async for chunk in self._stream_groq(message, history, full_system_instruction):
+                yield chunk
+            return
+
+        try:
             # 3. Call streaming API
-            # Since GenAI streaming is synchronous in the SDK for now, we wrap it
-            # Or use async if supported. The new SDK supports async via `aio`.
             response = await self.client.aio.models.generate_content_stream(
                 model=self.model_name,
                 contents=contents,
@@ -136,5 +141,38 @@ class ARIAAgent:
                     yield chunk.text
 
         except Exception as e:
+            if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
+                # Permanently exhaust Gemini for this session
+                setattr(settings, "gemini_exhausted", True)
+                
+                if settings.groq_api_key:
+                    try:
+                        # Silently stream from Groq
+                        async for chunk in self._stream_groq(message, history, full_system_instruction):
+                            yield chunk
+                        return
+                    except Exception as groq_e:
+                        logger.error(f"ARIA Groq fallback error: {groq_e}")
+                        yield f"\n\n**System Error:** Groq fallback failed. Details: {str(groq_e)}"
+                        return
+    async def _stream_groq(self, message: str, history: List[Dict[str, str]], full_system_instruction: str) -> AsyncGenerator[str, None]:
+        from groq import AsyncGroq
+        groq_client = AsyncGroq(api_key=settings.groq_api_key)
+        
+        groq_messages = [{"role": "system", "content": full_system_instruction}]
+        for msg in history:
+            groq_messages.append({"role": msg["role"], "content": msg["content"]})
+        groq_messages.append({"role": "user", "content": message})
+        
+        completion = await groq_client.chat.completions.create(
+            model=settings.groq_model if hasattr(settings, 'groq_model') else "llama3-8b-8192",
+            messages=groq_messages,
+            temperature=0.3,
+            stream=True
+        )
+        async for chunk in completion:
+            if chunk.choices and chunk.choices[0].delta.content:
+                yield chunk.choices[0].delta.content
+
             logger.error(f"ARIA stream error: {e}", exc_info=True)
             yield f"**System Error:** I am currently experiencing technical difficulties. Details: {str(e)}"
