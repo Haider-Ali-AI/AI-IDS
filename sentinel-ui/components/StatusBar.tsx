@@ -1,149 +1,79 @@
 "use client";
 
-import { motion, AnimatePresence } from "framer-motion";
-import { useSystemStatus } from "@/hooks/useSystemStatus";
-import { Activity, Shield, Wifi, WifiOff, Cpu, MemoryStick, AlertTriangle } from "lucide-react";
-import clsx from "clsx";
+import { useEffect, useRef, useState } from "react";
+import { motion } from "framer-motion";
 
-function StatusPill({
-  icon,
-  label,
-  value,
-  color,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  value: string;
-  color: "green" | "red" | "blue" | "yellow";
-}) {
-  const colors = {
-    green: {
-      bg: "rgba(0, 255, 136, 0.08)",
-      border: "rgba(0, 255, 136, 0.3)",
-      text: "#00ff88",
-      dot: "#00ff88",
-    },
-    red: {
-      bg: "rgba(255, 51, 102, 0.08)",
-      border: "rgba(255, 51, 102, 0.3)",
-      text: "#ff3366",
-      dot: "#ff3366",
-    },
-    blue: {
-      bg: "rgba(0, 212, 255, 0.08)",
-      border: "rgba(0, 212, 255, 0.3)",
-      text: "#00d4ff",
-      dot: "#00d4ff",
-    },
-    yellow: {
-      bg: "rgba(255, 215, 0, 0.08)",
-      border: "rgba(255, 215, 0, 0.3)",
-      text: "#ffd700",
-      dot: "#ffd700",
-    },
-  };
+const API = "http://127.0.0.1:8000";
 
-  const c = colors[color];
-
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: -8 }}
-      animate={{ opacity: 1, y: 0 }}
-      className="flex items-center gap-2 px-4 py-2 rounded-full text-sm"
-      style={{
-        background: c.bg,
-        border: `1px solid ${c.border}`,
-      }}
-    >
-      {/* pulsing dot */}
-      <span
-        className="pulse-dot w-2 h-2 rounded-full shrink-0"
-        style={{ background: c.dot }}
-      />
-      <span style={{ color: c.text }} className="opacity-70">
-        {icon}
-      </span>
-      <span className="text-slate-400 text-xs">{label}</span>
-      <span className="font-semibold text-xs" style={{ color: c.text }}>
-        {value}
-      </span>
-    </motion.div>
-  );
+interface Status {
+  sniffer?: { is_running?: boolean; packets_captured?: number };
+  llm_analyzer?: { is_running?: boolean; analyzed_count?: number; queue_size?: number };
+  triage?: { packets_flagged?: number };
+  database?: { connected?: boolean };
+  rag_engine?: { initialized?: boolean };
+  queues?: { packet_queue_size?: number; packet_queue_max?: number; llm_queue_size?: number; llm_queue_max?: number };
 }
 
-function LoadingBar() {
+function Pill({ label, active, warning }: { label: string; active: boolean; warning?: boolean }) {
+  const color = active ? "#00ff88" : warning ? "#ffa500" : "#ff3366";
   return (
-    <div className="flex items-center gap-2 px-4 py-2 rounded-full glass-card">
-      <div
-        className="w-2 h-2 rounded-full bg-slate-600 animate-pulse"
-      />
-      <span className="text-xs text-slate-600">Connecting…</span>
+    <div style={{
+      display: "inline-flex", alignItems: "center", gap: 7, padding: "5px 14px",
+      borderRadius: 999, border: `1px solid ${color}22`,
+      background: `${color}0d`, fontSize: 11, fontFamily: "var(--font-mono)",
+      color, whiteSpace: "nowrap"
+    }}>
+      <span className="pulse-dot" style={{ width: 7, height: 7, borderRadius: "50%", background: color, boxShadow: `0 0 8px ${color}`, flexShrink: 0 }} />
+      {label}
     </div>
   );
 }
 
 export default function StatusBar() {
-  const { status, isLoading, isError } = useSystemStatus();
+  const [status, setStatus] = useState<Status | null>(null);
+  const [apiOnline, setApiOnline] = useState(false);
 
-  const isRunning = status?.sniffer?.is_running ?? false;
-  const sniffer = status?.sniffer;
-  const triage = status?.triage;
+  useEffect(() => {
+    const poll = async () => {
+      try {
+        const r = await fetch(`${API}/status`);
+        if (r.ok) { setStatus(await r.json()); setApiOnline(true); }
+        else setApiOnline(false);
+      } catch { setApiOnline(false); }
+    };
+    poll();
+    const id = setInterval(poll, 4000);
+    return () => clearInterval(id);
+  }, []);
 
-  if (isLoading) {
-    return (
-      <div className="flex flex-wrap gap-3">
-        {[1, 2, 3, 4].map((i) => (
-          <LoadingBar key={i} />
-        ))}
-      </div>
-    );
-  }
-
-  if (isError) {
-    return (
-      <StatusPill
-        icon={<WifiOff size={12} />}
-        label="Backend"
-        value="Offline"
-        color="red"
-      />
-    );
-  }
+  const snifferOn = status?.sniffer?.is_running;
+  const llmOn = status?.llm_analyzer?.is_running;
+  const ragOn = status?.rag_engine?.initialized;
+  const dbOn = status?.database?.connected;
 
   return (
-    <AnimatePresence>
-      <div className="flex flex-wrap gap-3">
-        <StatusPill
-          icon={<Shield size={12} />}
-          label="Sentinel"
-          value={isRunning ? "Active" : "Stopped"}
-          color={isRunning ? "green" : "red"}
-        />
-        <StatusPill
-          icon={<Activity size={12} />}
-          label="Processed"
-          value={triage?.packets_processed?.toLocaleString() ?? "0"}
-          color="blue"
-        />
-        <StatusPill
-          icon={<AlertTriangle size={12} />}
-          label="Flagged"
-          value={triage?.packets_flagged?.toLocaleString() ?? "0"}
-          color={(triage?.packets_flagged ?? 0) > 0 ? "yellow" : "green"}
-        />
-        <StatusPill
-          icon={<Cpu size={12} />}
-          label="Captured"
-          value={sniffer?.packets_captured?.toLocaleString() ?? "0"}
-          color="blue"
-        />
-        <StatusPill
-          icon={<Wifi size={12} />}
-          label="Interface"
-          value={sniffer?.interface ?? "—"}
-          color="blue"
-        />
+    <motion.div
+      className="glass-card"
+      style={{ padding: "12px 20px" }}
+      initial={{ opacity: 0, y: -10 }}
+      animate={{ opacity: 1, y: 0 }}
+    >
+      <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 10, justifyContent: "space-between" }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <Pill label={apiOnline ? "API ONLINE" : "API OFFLINE"} active={apiOnline} />
+          <Pill label={snifferOn ? "SNIFFER ACTIVE" : "SNIFFER IDLE"} active={!!snifferOn} />
+          <Pill label={llmOn ? "GEMINI ACTIVE" : "GEMINI IDLE"} active={!!llmOn} />
+          <Pill label={ragOn ? "RAG LOADED" : "RAG OFFLINE"} active={!!ragOn} warning={!ragOn} />
+          <Pill label={dbOn ? "DB CONNECTED" : "DB ERROR"} active={!!dbOn} />
+        </div>
+        {status && (
+          <div style={{ display: "flex", gap: 20, fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-muted)" }}>
+            <span>PKT <span style={{ color: "var(--neon-blue)" }}>{(status.sniffer?.packets_captured ?? 0).toLocaleString()}</span></span>
+            <span>FLAGGED <span style={{ color: "var(--neon-orange)" }}>{(status.triage?.packets_flagged ?? 0).toLocaleString()}</span></span>
+            <span>ANALYZED <span style={{ color: "var(--neon-green)" }}>{(status.llm_analyzer?.analyzed_count ?? 0).toLocaleString()}</span></span>
+          </div>
+        )}
       </div>
-    </AnimatePresence>
+    </motion.div>
   );
 }

@@ -1,37 +1,20 @@
 import type { Metadata } from "next";
-import { Inter, Orbitron } from "next/font/google";
+import { Inter, Orbitron, Share_Tech_Mono } from "next/font/google";
 import "./globals.css";
 
-const inter = Inter({
-  subsets: ["latin"],
-  variable: "--font-inter",
-  display: "swap",
-});
-
-const orbitron = Orbitron({
-  subsets: ["latin"],
-  variable: "--font-orbitron",
-  display: "swap",
-});
+const inter = Inter({ subsets: ["latin"], variable: "--font-inter", display: "swap" });
+const orbitron = Orbitron({ subsets: ["latin"], variable: "--font-orbitron", display: "swap" });
+const shareTechMono = Share_Tech_Mono({ subsets: ["latin"], variable: "--font-mono", weight: "400", display: "swap" });
 
 export const metadata: Metadata = {
-  title: "Sentinel — AI Threat Intelligence",
-  description:
-    "LLM-Powered Intrusion Detection System with real-time network monitoring, AI-driven threat analysis, and SOC dashboard.",
-  keywords: ["IDS", "intrusion detection", "cybersecurity", "AI", "network security"],
+  title: "SENTINEL XDR — Autonomous AI Threat Intelligence",
+  description: "Autonomous AI-driven XDR platform with MACE, ARIA, ADRS, PHANTOM, AEGIS & CHRONICLE. Real-time network intrusion detection powered by Google Gemini.",
+  keywords: ["XDR", "IDS", "intrusion detection", "cybersecurity", "AI", "MITRE ATT&CK", "network security", "SOC"],
 };
 
-export default function RootLayout({
-  children,
-}: Readonly<{
-  children: React.ReactNode;
-}>) {
+export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html
-      lang="en"
-      className={`${inter.variable} ${orbitron.variable} h-full antialiased`}
-      suppressHydrationWarning
-    >
+    <html lang="en" className={`${inter.variable} ${orbitron.variable} ${shareTechMono.variable} h-full`} suppressHydrationWarning>
       <body
         className="min-h-full"
         style={{

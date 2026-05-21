@@ -1,260 +1,193 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { useAlerts } from "@/hooks/useAlerts";
-import { Alert } from "@/lib/api";
-import {
-  Shield,
-  AlertTriangle,
-  Info,
-  ChevronDown,
-  ChevronUp,
-  Wifi,
-  WifiOff,
-  Filter,
-} from "lucide-react";
 
-const THREAT_ICONS: Record<string, React.ReactNode> = {
-  CRITICAL: <AlertTriangle size={14} className="text-red-400" />,
-  HIGH: <AlertTriangle size={14} className="text-orange-400" />,
-  MEDIUM: <AlertTriangle size={14} className="text-yellow-400" />,
-  LOW: <Info size={14} className="text-green-400" />,
-  INFO: <Info size={14} className="text-blue-400" />,
-};
+const API = "http://127.0.0.1:8000";
 
-const THREAT_CLASS: Record<string, string> = {
-  CRITICAL: "badge-critical",
-  HIGH: "badge-high",
-  MEDIUM: "badge-medium",
-  LOW: "badge-low",
-  INFO: "badge-low",
-};
+function badge(level: string) {
+  const l = (level || "").toLowerCase();
+  if (l === "critical") return <span className="badge-critical">{l}</span>;
+  if (l === "high") return <span className="badge-high">{l}</span>;
+  if (l === "medium") return <span className="badge-medium">{l}</span>;
+  return <span className="badge-low">{l || "low"}</span>;
+}
 
-function AlertRow({ alert }: { alert: Alert }) {
-  const [expanded, setExpanded] = useState(false);
+function ts(unix: number) {
+  if (!unix) return "—";
+  return new Date(unix * 1000).toLocaleTimeString();
+}
 
-  const ts = new Date(alert.timestamp).toLocaleTimeString("en-US", {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
-
-  return (
-    <motion.div
-      layout
-      initial={{ opacity: 0, y: -12, scale: 0.98 }}
-      animate={{ opacity: 1, y: 0, scale: 1 }}
-      exit={{ opacity: 0, scale: 0.95 }}
-      transition={{ duration: 0.25 }}
-      className="glass-card mb-2 overflow-hidden cursor-pointer"
-      onClick={() => setExpanded((e) => !e)}
-    >
-      <div className="flex items-center gap-3 px-4 py-3">
-        <div className="shrink-0">
-          {THREAT_ICONS[alert.threat_level] ?? <Shield size={14} />}
-        </div>
-        <div className="shrink-0">
-          <span className={THREAT_CLASS[alert.threat_level] ?? "badge-low"}>
-            {alert.threat_level}
-          </span>
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-xs font-semibold text-slate-200 truncate">
-              {alert.threat_type || "Unknown Threat"}
-            </span>
-            <span className="text-xs text-slate-500">
-              {alert.source_ip}:{alert.source_port} → {alert.dest_ip}:{alert.dest_port}
-            </span>
-          </div>
-          <p className="text-xs text-slate-500 truncate mt-0.5">{alert.description}</p>
-        </div>
-        <div className="shrink-0 flex items-center gap-2">
-          <span className="text-xs text-slate-600">{ts}</span>
-          <span className="text-slate-600">
-            {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-          </span>
-        </div>
-      </div>
-
-      <AnimatePresence>
-        {expanded && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: "auto", opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.2 }}
-            className="overflow-hidden"
-          >
-            <div
-              className="px-4 pb-4 pt-1 border-t space-y-2"
-              style={{ borderColor: "rgba(0,212,255,0.1)" }}
-            >
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
-                <div>
-                  <p className="text-slate-500">Protocol</p>
-                  <p className="text-cyan-400 font-semibold">{alert.protocol}</p>
-                </div>
-                <div>
-                  <p className="text-slate-500">Action Taken</p>
-                  <p className="text-yellow-400 font-semibold">{alert.action_taken}</p>
-                </div>
-                <div>
-                  <p className="text-slate-500">Packet Size</p>
-                  <p className="text-slate-300">{alert.packet_size} bytes</p>
-                </div>
-                <div>
-                  <p className="text-slate-500">Alert ID</p>
-                  <p className="text-slate-500 font-mono text-[10px] truncate">{alert.id}</p>
-                </div>
-              </div>
-              {alert.ai_analysis && (
-                <div
-                  className="rounded-lg p-3 text-xs text-slate-300 leading-relaxed"
-                  style={{ background: "rgba(0,212,255,0.04)", border: "1px solid rgba(0,212,255,0.1)" }}
-                >
-                  <p className="text-cyan-400 font-semibold mb-1 uppercase text-[10px] tracking-wider">
-                    AI Analysis
-                  </p>
-                  {alert.ai_analysis}
-                </div>
-              )}
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </motion.div>
-  );
+interface Alert {
+  id: number;
+  timestamp: number;
+  src_ip: string;
+  dst_ip: string;
+  src_port?: number;
+  dst_port?: number;
+  protocol: string;
+  tcp_flags?: string;
+  triage_flags?: string;
+  threat_level?: string;
+  confidence?: number;
+  attack_vector?: string;
+  mitre_technique?: string;
+  explanation?: string;
+  recommended_action?: string;
+  status: string;
 }
 
 export default function AlertFeed() {
-  const { alerts, isConnected } = useAlerts(50);
-  const [levelFilter, setLevelFilter] = useState<string>("ALL");
-  const [showFilter, setShowFilter] = useState(false);
+  const [alerts, setAlerts] = useState<Alert[]>([]);
+  const [expanded, setExpanded] = useState<number | null>(null);
+  const [filter, setFilter] = useState("All");
 
-  const levels = ["ALL", "CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"];
-  const filtered =
-    levelFilter === "ALL"
-      ? alerts
-      : alerts.filter((a) => a.threat_level === levelFilter);
+  useEffect(() => {
+    const poll = async () => {
+      try {
+        const r = await fetch(`${API}/alerts?limit=60`);
+        if (r.ok) {
+          const d = await r.json();
+          setAlerts(d.alerts || []);
+        }
+      } catch {}
+    };
+    poll();
+    const id = setInterval(poll, 3000);
+    return () => clearInterval(id);
+  }, []);
+
+  const levels = ["All", "Critical", "High", "Medium", "Low"];
+  const filtered = filter === "All" ? alerts : alerts.filter(a => a.threat_level === filter);
 
   return (
-    <div className="glass-card flex flex-col overflow-hidden" style={{ maxHeight: "600px" }}>
-      {/* Header */}
-      <div className="p-5 border-b shrink-0 flex items-center justify-between" style={{ borderColor: "rgba(0,212,255,0.15)" }}>
-        <div>
-          <h3
-            className="text-sm font-bold text-cyan-400 uppercase tracking-widest"
-            style={{ fontFamily: "var(--font-orbitron, monospace)" }}
-          >
-            Live Alert Feed
-          </h3>
-          <p className="text-xs text-slate-500 mt-0.5">
-            {filtered.length} event{filtered.length !== 1 ? "s" : ""}
-            {" — "}{levelFilter === "ALL" ? "all levels" : levelFilter}
-          </p>
-        </div>
-        <div className="flex items-center gap-3">
-          {/* WS status */}
-          <div className="flex items-center gap-1.5 text-xs">
-            {isConnected ? (
-              <>
-                <span className="pulse-dot w-2 h-2 rounded-full" style={{ background: "#00ff88" }} />
-                <span style={{ color: "#00ff88" }}>Live</span>
-                <Wifi size={12} className="text-green-400" />
-              </>
-            ) : (
-              <>
-                <span className="w-2 h-2 rounded-full bg-slate-600" />
-                <span className="text-slate-500">Polling</span>
-                <WifiOff size={12} className="text-slate-500" />
-              </>
-            )}
-          </div>
-          {/* Filter btn */}
+    <div>
+      {/* Filter pills */}
+      <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
+        {levels.map(l => (
           <button
-            onClick={() => setShowFilter((s) => !s)}
-            className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs transition-all"
+            key={l}
+            onClick={() => setFilter(l)}
             style={{
-              background: showFilter ? "rgba(0,212,255,0.1)" : "transparent",
-              border: "1px solid rgba(0,212,255,0.2)",
-              color: "#00d4ff",
+              padding: "4px 14px", borderRadius: 999, cursor: "pointer",
+              fontFamily: "var(--font-mono)", fontSize: 11, fontWeight: 700,
+              border: `1px solid ${filter === l ? "var(--neon-blue)" : "rgba(0,212,255,0.15)"}`,
+              background: filter === l ? "rgba(0,212,255,0.12)" : "transparent",
+              color: filter === l ? "var(--neon-blue)" : "var(--text-muted)",
+              transition: "all 0.2s"
             }}
-          >
-            <Filter size={12} />
-            Filter
-          </button>
-        </div>
+          >{l}</button>
+        ))}
+        <span style={{ marginLeft: "auto", fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-muted)", alignSelf: "center" }}>
+          {filtered.length} events
+        </span>
       </div>
 
-      {/* Filter row */}
-      <AnimatePresence>
-        {showFilter && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: "auto", opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            className="overflow-hidden border-b"
-            style={{ borderColor: "rgba(0,212,255,0.1)" }}
-          >
-            <div className="flex gap-2 p-3 flex-wrap">
-              {levels.map((l) => (
-                <button
-                  key={l}
-                  onClick={() => setLevelFilter(l)}
-                  className="px-3 py-1 rounded-full text-xs font-semibold transition-all"
-                  style={{
-                    background:
-                      levelFilter === l
-                        ? l === "CRITICAL"
-                          ? "rgba(255,51,102,0.2)"
-                          : l === "HIGH"
-                          ? "rgba(255,153,0,0.2)"
-                          : "rgba(0,212,255,0.2)"
-                        : "transparent",
-                    border: `1px solid ${
-                      levelFilter === l
-                        ? l === "CRITICAL"
-                          ? "#ff3366"
-                          : l === "HIGH"
-                          ? "#ff9900"
-                          : "#00d4ff"
-                        : "rgba(100,116,139,0.2)"
-                    }`,
-                    color:
-                      levelFilter === l
-                        ? l === "CRITICAL"
-                          ? "#ff3366"
-                          : l === "HIGH"
-                          ? "#ff9900"
-                          : "#00d4ff"
-                        : "#64748b",
-                  }}
+      {/* Alert rows */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        <AnimatePresence>
+          {filtered.length === 0 ? (
+            <motion.div
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+              style={{ padding: "3rem", textAlign: "center", color: "var(--text-muted)", fontFamily: "var(--font-mono)", fontSize: 13 }}
+            >
+              ⟨ NO ALERTS DETECTED — SYSTEM MONITORING ⟩
+            </motion.div>
+          ) : (
+            filtered.slice(0, 40).map((alert, i) => (
+              <motion.div
+                key={alert.id}
+                initial={{ opacity: 0, x: -20 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ delay: Math.min(i * 0.03, 0.5) }}
+              >
+                {/* Main row */}
+                <div
+                  className="glass-card table-row-hover"
+                  style={{ padding: "10px 16px", cursor: "pointer", transition: "all 0.2s" }}
+                  onClick={() => setExpanded(expanded === alert.id ? null : alert.id)}
                 >
-                  {l}
-                </button>
-              ))}
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+                  <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                    <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-muted)", minWidth: 65 }}>
+                      {ts(alert.timestamp)}
+                    </span>
+                    {badge(alert.threat_level || "low")}
+                    <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--text-primary)", minWidth: 160 }}>
+                      {alert.attack_vector || "Analyzing…"}
+                    </span>
+                    <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-muted)", flex: 1 }}>
+                      {alert.src_ip} → {alert.dst_ip} · {alert.protocol}
+                    </span>
+                    {alert.confidence != null && (
+                      <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--neon-blue)" }}>
+                        {(alert.confidence * 100).toFixed(0)}%
+                      </span>
+                    )}
+                    <span style={{ color: "var(--text-muted)", fontSize: 10 }}>
+                      {expanded === alert.id ? "▲" : "▼"}
+                    </span>
+                  </div>
+                </div>
 
-      {/* Alert list */}
-      <div className="flex-1 overflow-y-auto p-4">
-        {filtered.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-40 gap-3 text-slate-600">
-            <Shield size={32} />
-            <p className="text-sm">No alerts detected</p>
-            <p className="text-xs">Sentinel is monitoring the network…</p>
-          </div>
-        ) : (
-          <AnimatePresence initial={false}>
-            {filtered.map((alert) => (
-              <AlertRow key={alert.id} alert={alert} />
-            ))}
-          </AnimatePresence>
-        )}
+                {/* Expanded detail */}
+                <AnimatePresence>
+                  {expanded === alert.id && (
+                    <motion.div
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: "auto", opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      transition={{ duration: 0.25 }}
+                      style={{ overflow: "hidden" }}
+                    >
+                      <div
+                        className="glass-card"
+                        style={{
+                          margin: "2px 0 4px 0", padding: "16px 20px",
+                          borderColor: "rgba(0,212,255,0.25)",
+                          background: "rgba(0,20,50,0.6)"
+                        }}
+                      >
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px 24px", fontFamily: "var(--font-mono)", fontSize: 11 }}>
+                          <div>
+                            <div style={{ color: "var(--text-muted)", marginBottom: 4 }}>Network</div>
+                            <div style={{ color: "var(--text-primary)" }}>{alert.src_ip}:{alert.src_port ?? "?"} → {alert.dst_ip}:{alert.dst_port ?? "?"}</div>
+                            <div style={{ color: "var(--text-muted)", marginTop: 8 }}>Protocol / Flags</div>
+                            <div style={{ color: "var(--neon-blue)" }}>{alert.protocol} {alert.tcp_flags || ""}</div>
+                          </div>
+                          <div>
+                            <div style={{ color: "var(--text-muted)", marginBottom: 4 }}>MITRE ATT&CK</div>
+                            <div style={{ color: "var(--neon-purple)" }}>{alert.mitre_technique || "—"}</div>
+                            <div style={{ color: "var(--text-muted)", marginTop: 8 }}>Action</div>
+                            <div style={{ color: "var(--neon-orange)" }}>{alert.recommended_action || "—"}</div>
+                          </div>
+                        </div>
+                        {alert.explanation && (
+                          <div style={{
+                            marginTop: 12, padding: "10px 14px",
+                            background: "rgba(0,212,255,0.05)", borderRadius: 8,
+                            border: "1px solid rgba(0,212,255,0.12)",
+                            fontSize: 12, lineHeight: 1.6, color: "#94a3b8"
+                          }}>
+                            {alert.explanation}
+                          </div>
+                        )}
+                        <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
+                          {(alert.triage_flags || "").split(",").filter(Boolean).map(f => (
+                            <span key={f} style={{
+                              fontFamily: "var(--font-mono)", fontSize: 9, padding: "2px 8px",
+                              borderRadius: 4, border: "1px solid rgba(168,85,247,0.4)",
+                              background: "rgba(168,85,247,0.08)", color: "#a855f7"
+                            }}>{f.trim()}</span>
+                          ))}
+                        </div>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </motion.div>
+            ))
+          )}
+        </AnimatePresence>
       </div>
     </div>
   );

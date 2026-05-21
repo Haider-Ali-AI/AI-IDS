@@ -62,7 +62,7 @@ export function useAlerts(limit = 50) {
 
   // Merge WS alerts with initial SWR data, deduplicate by id
   const allAlerts = (() => {
-    const seen = new Set<string>();
+    const seen = new Set<number>();
     const merged = [...wsAlerts, ...(initialAlerts ?? [])];
     return merged.filter((a) => {
       if (seen.has(a.id)) return false;

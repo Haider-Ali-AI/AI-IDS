@@ -55,9 +55,10 @@ class TriageFlag:
     SUSPICIOUS_PORT = "SUSPICIOUS_PORT"
     DNS_TUNNEL = "DNS_TUNNEL"
     HIGH_FREQUENCY = "HIGH_FREQUENCY"
-    NULL_SCAN = "NULL_SCAN"
-    XMAS_SCAN = "XMAS_SCAN"
-    FIN_SCAN = "FIN_SCAN"
+    NULL_SCAN = "null_scan"
+    XMAS_SCAN = "xmas_scan"
+    FIN_SCAN = "fin_scan"
+    PROMPT_INJECTION = "prompt_injection"
 
 
 @dataclass
@@ -187,6 +188,7 @@ class TriageEngine:
         self,
         packet_queue: queue.Queue,
         llm_queue: queue.Queue,
+        mace_queue: queue.Queue,
         on_flag_callback: Optional[Callable] = None
     ):
         """
@@ -195,12 +197,18 @@ class TriageEngine:
         Args:
             packet_queue: Input queue (from sniffer).
             llm_queue: Output queue (to LLM analyzer).
+            mace_queue: Output queue (to MACE Engine).
             on_flag_callback: Optional callback when a packet is flagged.
                               Signature: callback(triaged_packet: TriagedPacket)
         """
         self.packet_queue = packet_queue
         self.llm_queue = llm_queue
+        self.mace_queue = mace_queue
         self.on_flag_callback = on_flag_callback
+
+        # Initialize AEGIS for LLM protection
+        from modules.aegis import AegisEngine
+        self.aegis = AegisEngine()
 
         # Threading
         self._thread: Optional[threading.Thread] = None
@@ -397,14 +405,28 @@ class TriageEngine:
 
         # ── Forward if flagged ───────────────────────────────────────
         if flags:
+            priority = self._calculate_priority(flags)
+
+            # 9. AEGIS: Adversarial AI Evasion Detection
+            if record.payload_hex and self.aegis.scan_payload(record.payload_hex):
+                flags.append(TriageFlag.PROMPT_INJECTION)
+                priority += 5.0 # Max priority for attacking the AI itself
+
             triaged = TriagedPacket(
                 record=record,
                 flags=flags,
-                priority=self._calculate_priority(flags)
+                priority=int(priority)
             )
             
             try:
                 self.llm_queue.put_nowait(triaged)
+                
+                if self.mace_queue:
+                    try:
+                        self.mace_queue.put_nowait(triaged)
+                    except queue.Full:
+                        logger.warning("MACE queue full — dropping flagged packet for correlation")
+
                 self._packets_flagged += 1
                 logger.info(
                     f"FLAGGED [{','.join(flags)}] {record.to_summary()}"
@@ -431,5 +453,6 @@ class TriageEngine:
             TriageFlag.NULL_SCAN: 9,
             TriageFlag.XMAS_SCAN: 9,
             TriageFlag.FIN_SCAN: 8,
+            TriageFlag.PROMPT_INJECTION: 10,
         }
         return sum(priority_map.get(f, 1) for f in flags)

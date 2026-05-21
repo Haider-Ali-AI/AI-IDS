@@ -38,7 +38,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 from config import settings
@@ -62,13 +62,29 @@ logger = logging.getLogger("ids.main")
 # Thread-safe queues connecting the pipeline stages
 packet_queue = queue.Queue(maxsize=settings.packet_queue_maxsize)
 llm_queue = queue.Queue(maxsize=settings.llm_queue_maxsize)
+mace_queue = queue.Queue(maxsize=settings.llm_queue_maxsize)  # Same size as LLM queue
 
 # Component instances (initialized during startup)
 db_manager = DatabaseManager()
 sniffer = PacketSniffer(packet_queue)
-triage_engine = TriageEngine(packet_queue, llm_queue)
+triage_engine = TriageEngine(packet_queue, llm_queue, mace_queue)
 llm_analyzer = LLMAnalyzer(llm_queue, db_manager)
 rag_engine = RAGEngine()
+
+from modules.response import ADRSEngine
+adrs_engine = ADRSEngine(db_manager)
+
+from modules.phantom import PhantomEngine
+phantom_engine = PhantomEngine(db_manager)
+
+from modules.correlation import MACEEngine
+mace_engine = MACEEngine(mace_queue, db_manager, adrs_engine=adrs_engine, phantom_engine=phantom_engine)
+
+from modules.chronicle import ChronicleEngine
+chronicle_engine = ChronicleEngine(db_manager)
+
+from modules.aria import ARIAAgent
+aria_agent = ARIAAgent(db_manager, rag_engine)
 
 # WebSocket connections for real-time alerts
 ws_connections: List[WebSocket] = []
@@ -112,6 +128,10 @@ async def lifespan(app: FastAPI):
         llm_analyzer.start()
         logger.info("✓ LLM analyzer started")
 
+        # 5. Start MACE engine
+        mace_engine.start()
+        logger.info("✓ MACE engine started")
+
         logger.info("─" * 60)
         logger.info(f"  API ready at http://localhost:{settings.api_port}")
         logger.info(f"  Dashboard: streamlit run dashboard/app.py")
@@ -141,6 +161,7 @@ async def lifespan(app: FastAPI):
     # Stop processing threads
     triage_engine.stop()
     llm_analyzer.stop()
+    mace_engine.stop()
 
     # Close database
     await db_manager.close()
@@ -190,6 +211,11 @@ class ManualAnalysisRequest(BaseModel):
     payload_hex: Optional[str] = None
     packet_size: int = 64
     flags: Optional[List[str]] = ["MANUAL_SUBMISSION"]
+
+class AriaChatRequest(BaseModel):
+    """Request body for ARIA chat."""
+    message: str
+    history: List[dict] = []
 
 
 # ── API Endpoints ────────────────────────────────────────────────────────────
@@ -415,11 +441,40 @@ async def analyze_sample(request: ManualAnalysisRequest):
                 "input": request.model_dump(),
             }
     except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Analysis failed: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/chains", tags=["Queries"])
+async def get_active_chains():
+    """Retrieve active attack chains built by MACE."""
+    try:
+        chains = await db_manager.get_active_chains()
+        return {"chains": chains}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/chronicle/{chain_id}", tags=["CHRONICLE"])
+async def generate_chronicle_report(chain_id: str):
+    """Generate an executive narrative for an attack chain."""
+    try:
+        report = await chronicle_engine.generate_report(chain_id)
+        if not report:
+            raise HTTPException(status_code=404, detail="Could not generate report or chain not found.")
+        return report
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ── ARIA Endpoints ───────────────────────────────────────────────────────────
+
+@app.post("/api/aria/chat", tags=["ARIA"])
+async def aria_chat(request: AriaChatRequest):
+    """
+    Stream a response from the ARIA AI Copilot.
+    """
+    async def generate():
+        async for chunk in aria_agent.stream_chat(request.message, request.history):
+            yield chunk
+
+    return StreamingResponse(generate(), media_type="text/plain")
 
 # ── WebSocket for Real-Time Alerts ───────────────────────────────────────────
 

@@ -137,11 +137,69 @@ class DatabaseManager:
                 analyzed_packets INTEGER DEFAULT 0
             );
 
+            -- MACE Attack Chains
+            CREATE TABLE IF NOT EXISTS attack_chains (
+                chain_id TEXT PRIMARY KEY,
+                actor_id TEXT,
+                events_json TEXT,          -- JSON array of event IDs
+                kill_chain_phases TEXT,    -- JSON array
+                mitre_techniques TEXT,     -- JSON array
+                chain_score REAL,
+                attacker_intent TEXT,
+                ai_confidence REAL,
+                status TEXT DEFAULT 'active',
+                first_seen REAL,
+                last_seen REAL,
+                created_at REAL
+            );
+
+            -- ADRS Response Actions
+            CREATE TABLE IF NOT EXISTS response_actions (
+                action_id TEXT PRIMARY KEY,
+                chain_id TEXT,
+                action_type TEXT,
+                target_ip TEXT,
+                policy_name TEXT,
+                executed_at REAL,
+                simulated BOOLEAN,
+                analyst_approved BOOLEAN,
+                approved_by TEXT,
+                rollback_at REAL,
+                rolled_back BOOLEAN DEFAULT FALSE,
+                ai_explanation TEXT,
+                outcome TEXT
+            );
+            
+            -- PHANTOM Attacker Profiles
+            CREATE TABLE IF NOT EXISTS attacker_profiles (
+                actor_id TEXT PRIMARY KEY,
+                first_seen REAL,
+                last_seen REAL,
+                total_chains INTEGER DEFAULT 0,
+                known_tactics TEXT,        -- JSON array
+                risk_score REAL DEFAULT 0.0,
+                confidence_level REAL DEFAULT 0.0,
+                profile_notes TEXT
+            );
+
+            -- CHRONICLE Incident Reports
+            CREATE TABLE IF NOT EXISTS incident_reports (
+                report_id TEXT PRIMARY KEY,
+                chain_id TEXT,
+                actor_id TEXT,
+                executive_summary TEXT,
+                technical_details TEXT,
+                generated_at REAL,
+                UNIQUE(chain_id)
+            );
+
             -- Performance indexes
             CREATE INDEX IF NOT EXISTS idx_alerts_timestamp ON alerts(timestamp);
             CREATE INDEX IF NOT EXISTS idx_alerts_threat_level ON alerts(threat_level);
             CREATE INDEX IF NOT EXISTS idx_alerts_status ON alerts(status);
             CREATE INDEX IF NOT EXISTS idx_alerts_src_ip ON alerts(src_ip);
+            CREATE INDEX IF NOT EXISTS idx_chains_actor ON attack_chains(actor_id);
+            CREATE INDEX IF NOT EXISTS idx_chains_status ON attack_chains(status, last_seen);
         """)
         await self._connection.commit()
 
@@ -298,6 +356,129 @@ class DatabaseManager:
         """)
         row = await cursor.fetchone()
         return dict(row) if row else {}
+
+    # ── MACE Attack Chains CRUD ──────────────────────────────────────────
+
+    async def insert_or_update_chain(self, chain_data: Dict[str, Any]):
+        """Insert a new attack chain or update an existing one."""
+        await self._connection.execute("""
+            INSERT INTO attack_chains (
+                chain_id, actor_id, events_json, kill_chain_phases,
+                mitre_techniques, chain_score, attacker_intent, ai_confidence,
+                status, first_seen, last_seen, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(chain_id) DO UPDATE SET
+                events_json = excluded.events_json,
+                kill_chain_phases = excluded.kill_chain_phases,
+                mitre_techniques = excluded.mitre_techniques,
+                chain_score = excluded.chain_score,
+                attacker_intent = excluded.attacker_intent,
+                ai_confidence = excluded.ai_confidence,
+                status = excluded.status,
+                last_seen = excluded.last_seen
+        """, (
+            chain_data['chain_id'], chain_data['actor_id'], chain_data['events_json'],
+            chain_data['kill_chain_phases'], chain_data['mitre_techniques'],
+            chain_data.get('chain_score', 0.0), chain_data.get('attacker_intent'),
+            chain_data.get('ai_confidence', 0.0), chain_data.get('status', 'active'),
+            chain_data['first_seen'], chain_data['last_seen'],
+            chain_data.get('created_at', time.time())
+        ))
+        await self._connection.commit()
+
+    async def get_active_chains(self) -> List[Dict[str, Any]]:
+        """Get all active attack chains."""
+        cursor = await self._connection.execute(
+            "SELECT * FROM attack_chains WHERE status = 'active' ORDER BY chain_score DESC"
+        )
+        rows = await cursor.fetchall()
+        return [dict(row) for row in rows]
+
+    # ── ADRS Response Actions CRUD ───────────────────────────────────────
+
+    async def insert_response_action(self, action_data: Dict[str, Any]):
+        """Insert a new response action record."""
+        await self._connection.execute("""
+            INSERT INTO response_actions (
+                action_id, chain_id, action_type, target_ip, policy_name,
+                executed_at, simulated, analyst_approved, rollback_at,
+                rolled_back, outcome
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            action_data['action_id'], action_data['chain_id'], action_data['action_type'],
+            action_data['target_ip'], action_data['policy_name'], action_data['executed_at'],
+            action_data.get('simulated', False), action_data.get('analyst_approved', False),
+            action_data.get('rollback_at', 0.0), action_data.get('rolled_back', False),
+            action_data.get('outcome', 'success')
+        ))
+        await self._connection.commit()
+
+    async def get_recent_actions(self, limit: int = 20) -> List[Dict[str, Any]]:
+        """Get recent response actions."""
+        cursor = await self._connection.execute(
+            "SELECT * FROM response_actions ORDER BY executed_at DESC LIMIT ?", (limit,)
+        )
+        rows = await cursor.fetchall()
+        return [dict(row) for row in rows]
+
+    # ── PHANTOM Attacker Profiles CRUD ───────────────────────────────────
+
+    async def get_attacker_profile(self, actor_id: str) -> Optional[Dict[str, Any]]:
+        cursor = await self._connection.execute(
+            "SELECT * FROM attacker_profiles WHERE actor_id = ?", (actor_id,)
+        )
+        row = await cursor.fetchone()
+        return dict(row) if row else None
+
+    async def upsert_attacker_profile(self, profile_data: Dict[str, Any]):
+        await self._connection.execute("""
+            INSERT INTO attacker_profiles (
+                actor_id, first_seen, last_seen, total_chains,
+                known_tactics, risk_score, confidence_level, profile_notes
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(actor_id) DO UPDATE SET
+                last_seen = excluded.last_seen,
+                total_chains = excluded.total_chains,
+                known_tactics = excluded.known_tactics,
+                risk_score = excluded.risk_score,
+                confidence_level = excluded.confidence_level,
+                profile_notes = excluded.profile_notes
+        """, (
+            profile_data['actor_id'], profile_data['first_seen'], profile_data['last_seen'],
+            profile_data.get('total_chains', 0), profile_data.get('known_tactics', '[]'),
+            profile_data.get('risk_score', 0.0), profile_data.get('confidence_level', 0.0),
+            profile_data.get('profile_notes', '')
+        ))
+        await self._connection.commit()
+
+    # ── CHRONICLE Incident Reports CRUD ──────────────────────────────────
+
+    async def get_incident_report(self, chain_id: str) -> Optional[Dict[str, Any]]:
+        cursor = await self._connection.execute(
+            "SELECT * FROM incident_reports WHERE chain_id = ?", (chain_id,)
+        )
+        row = await cursor.fetchone()
+        return dict(row) if row else None
+
+    async def insert_incident_report(self, report_data: Dict[str, Any]):
+        await self._connection.execute("""
+            INSERT OR REPLACE INTO incident_reports (
+                report_id, chain_id, actor_id, executive_summary,
+                technical_details, generated_at
+            ) VALUES (?, ?, ?, ?, ?, ?)
+        """, (
+            report_data['report_id'], report_data['chain_id'], report_data['actor_id'],
+            report_data['executive_summary'], report_data.get('technical_details', ''),
+            report_data['generated_at']
+        ))
+        await self._connection.commit()
+        
+    async def get_chain_by_id(self, chain_id: str) -> Optional[Dict[str, Any]]:
+        cursor = await self._connection.execute(
+            "SELECT * FROM attack_chains WHERE chain_id = ?", (chain_id,)
+        )
+        row = await cursor.fetchone()
+        return dict(row) if row else None
 
     # ── Statistics Queries ───────────────────────────────────────────────
 

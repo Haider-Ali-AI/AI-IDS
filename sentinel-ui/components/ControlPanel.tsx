@@ -1,316 +1,152 @@
 "use client";
 
-import { useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
-import useSWR from "swr";
-import { fetcher } from "@/lib/api";
-import { useSystemStatus } from "@/hooks/useSystemStatus";
-import {
-  Shield,
-  Play,
-  Square,
-  ChevronLeft,
-  ChevronRight,
-  Network,
-  Search,
-  Activity,
-} from "lucide-react";
+import { useEffect, useState } from "react";
+import { motion } from "framer-motion";
 
-const INTERFACES = ["Wi-Fi", "Ethernet", "lo", "eth0", "wlan0"];
+const API = "http://127.0.0.1:8000";
+
+interface SystemStatus {
+  sniffer?: { is_running?: boolean; interface?: string };
+  llm_analyzer?: { analyzed_count?: number; error_count?: number };
+  queues?: { packet_queue_size?: number; packet_queue_max?: number; llm_queue_size?: number; llm_queue_max?: number };
+  counts?: { total?: number; critical?: number; high?: number };
+}
 
 export default function ControlPanel() {
-  const [isOpen, setIsOpen] = useState(false);
-  const [selectedIface, setSelectedIface] = useState("Wi-Fi");
-  const [isStarting, setIsStarting] = useState(false);
-  const [isStopping, setIsStopping] = useState(false);
-  const [packetInput, setPacketInput] = useState("");
-  const [analyzeResult, setAnalyzeResult] = useState("");
-  const { status } = useSystemStatus();
+  const [status, setStatus] = useState<SystemStatus | null>(null);
+  const [interfaces, setInterfaces] = useState<string[]>(["Wi-Fi"]);
+  const [selected, setSelected] = useState("Wi-Fi");
+  const [toggling, setToggling] = useState(false);
+  const [open, setOpen] = useState(false);
 
-  const isRunning = status?.sniffer?.is_running ?? false;
-  const sniffer = status?.sniffer;
-  const triage = status?.triage;
-
-  const handleStart = async () => {
-    if (isRunning) return;
-    setIsStarting(true);
+  const fetchStatus = async () => {
     try {
-      const r = await fetch("/api/proxy/toggle-sniffing", {
+      const r = await fetch(`${API}/status`);
+      if (r.ok) setStatus(await r.json());
+    } catch {}
+    try {
+      const r = await fetch(`${API}/interfaces`);
+      if (r.ok) {
+        const d = await r.json();
+        setInterfaces(d.interfaces || ["Wi-Fi"]);
+        setSelected(d.current || "Wi-Fi");
+      }
+    } catch {}
+  };
+
+  useEffect(() => {
+    fetchStatus();
+    const id = setInterval(fetchStatus, 3000);
+    return () => clearInterval(id);
+  }, []);
+
+  const toggleSniffer = async () => {
+    setToggling(true);
+    try {
+      await fetch(`${API}/toggle-sniffing`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ interface: selectedIface }),
+        body: JSON.stringify({ interface: selected })
       });
-      if (!r.ok) throw new Error("Failed to start");
-    } catch {
-      // ignore
-    } finally {
-      setIsStarting(false);
-    }
+      await fetchStatus();
+    } catch {}
+    setToggling(false);
   };
 
-  const handleStop = async () => {
-    if (!isRunning) return;
-    setIsStopping(true);
-    try {
-      await fetch("/api/proxy/toggle-sniffing", { method: "POST" });
-    } catch {
-      // ignore
-    } finally {
-      setIsStopping(false);
-    }
-  };
-
-  const handleAnalyze = async () => {
-    if (!packetInput.trim()) return;
-    setAnalyzeResult("Analyzing…");
-    try {
-      const r = await fetch("/api/proxy/analyze-sample", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ 
-           src_ip: "127.0.0.1", 
-           dst_ip: "127.0.0.1", 
-           payload_hex: packetInput 
-        }),
-      });
-      const data = await r.json();
-      setAnalyzeResult(data?.analysis?.explanation ?? "Analysis complete. See alerts for details.");
-    } catch (e) {
-      setAnalyzeResult("Error: Could not reach backend.");
-    }
-  };
-
-  const { data: interfacesData } = useSWR<{ interfaces: string[] }>(
-    "/api/proxy/interfaces",
-    fetcher
-  );
-  const interfaces = interfacesData?.interfaces ?? INTERFACES;
-
-  const qFill =
-    status?.queues && status.queues.packet_queue_max > 0
-      ? (status.queues.packet_queue_size / status.queues.packet_queue_max) * 100
-      : 0;
+  const snifferOn = status?.sniffer?.is_running;
+  const pqSize = status?.queues?.packet_queue_size ?? 0;
+  const pqMax = status?.queues?.packet_queue_max ?? 1;
+  const lqSize = status?.queues?.llm_queue_size ?? 0;
+  const lqMax = status?.queues?.llm_queue_max ?? 1;
 
   return (
     <>
-      {/* Toggle tab */}
+      {/* Gear FAB */}
       <motion.button
-        onClick={() => setIsOpen((o) => !o)}
-        className="fixed left-0 top-1/2 -translate-y-1/2 z-40 flex items-center justify-center w-8 h-16 rounded-r-lg transition-all"
-        style={{ background: "rgba(0,212,255,0.12)", border: "1px solid rgba(0,212,255,0.3)", borderLeft: "none" }}
-        whileHover={{ width: 36 }}
+        onClick={() => setOpen(o => !o)}
+        whileHover={{ scale: 1.08, rotate: 15 }}
+        whileTap={{ scale: 0.95 }}
+        style={{
+          position: "fixed", bottom: 96, left: 28, zIndex: 1000,
+          width: 52, height: 52, borderRadius: "50%",
+          background: "rgba(0,12,30,0.9)", border: "1.5px solid rgba(0,212,255,0.4)",
+          cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+          fontSize: 20, boxShadow: "0 0 20px rgba(0,212,255,0.2)"
+        }}
       >
-        <motion.div animate={{ rotate: isOpen ? 0 : 0 }}>
-          {isOpen ? <ChevronLeft size={16} className="text-cyan-400" /> : <ChevronRight size={16} className="text-cyan-400" />}
-        </motion.div>
+        ⚙️
       </motion.button>
 
-      {/* Drawer */}
-      <AnimatePresence>
-        {isOpen && (
-          <motion.div
-            initial={{ x: "-100%" }}
-            animate={{ x: 0 }}
-            exit={{ x: "-100%" }}
-            transition={{ type: "spring", damping: 25, stiffness: 200 }}
-            className="fixed left-0 top-0 bottom-0 z-30 w-72 flex flex-col"
+      {/* Panel */}
+      {open && (
+        <motion.div
+          initial={{ opacity: 0, y: 20, scale: 0.95 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          exit={{ opacity: 0 }}
+          className="glass-card glow-blue"
+          style={{
+            position: "fixed", bottom: 160, left: 28, zIndex: 999,
+            width: 300, padding: "20px"
+          }}
+        >
+          <div style={{ fontFamily: "var(--font-display)", fontSize: 10, color: "var(--neon-blue)", letterSpacing: "0.2em", marginBottom: 16 }}>
+            ⚙ CONTROL PANEL
+          </div>
+
+          {/* Interface selector */}
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-muted)", marginBottom: 6 }}>NETWORK INTERFACE</div>
+            <select
+              value={selected}
+              onChange={e => setSelected(e.target.value)}
+              style={{
+                width: "100%", background: "rgba(0,212,255,0.05)",
+                border: "1px solid rgba(0,212,255,0.25)", borderRadius: 8,
+                padding: "6px 10px", fontFamily: "var(--font-mono)", fontSize: 11,
+                color: "var(--text-primary)", outline: "none"
+              }}
+            >
+              {interfaces.map(iface => <option key={iface} value={iface}>{iface}</option>)}
+            </select>
+          </div>
+
+          {/* Start/Stop */}
+          <button
+            onClick={toggleSniffer}
+            disabled={toggling}
             style={{
-              background: "rgba(5, 12, 28, 0.97)",
-              borderRight: "1px solid rgba(0,212,255,0.2)",
-              backdropFilter: "blur(20px)",
+              width: "100%", padding: "10px", borderRadius: 10, cursor: "pointer",
+              fontFamily: "var(--font-display)", fontSize: 11, letterSpacing: "0.1em",
+              border: `1.5px solid ${snifferOn ? "rgba(255,51,102,0.6)" : "rgba(0,255,136,0.6)"}`,
+              background: snifferOn ? "rgba(255,51,102,0.12)" : "rgba(0,255,136,0.1)",
+              color: snifferOn ? "#ff3366" : "#00ff88",
+              opacity: toggling ? 0.5 : 1, transition: "all 0.2s", marginBottom: 14
             }}
           >
-            {/* Header */}
-            <div className="p-5 border-b" style={{ borderColor: "rgba(0,212,255,0.15)" }}>
-              <div className="flex items-center gap-2 mb-1">
-                <Shield size={18} className="text-cyan-400" />
-                <h2
-                  className="text-sm font-bold text-cyan-400 uppercase tracking-widest"
-                  style={{ fontFamily: "var(--font-orbitron, monospace)" }}
-                >
-                  Sentinel Control
-                </h2>
-              </div>
-              <p className="text-xs text-slate-500">Network monitoring controls</p>
-            </div>
+            {toggling ? "⟳ PROCESSING…" : snifferOn ? "⏹ STOP SNIFFER" : "▶ START SNIFFER"}
+          </button>
 
-            <div className="flex-1 overflow-y-auto p-5 space-y-6">
-              {/* Status summary */}
-              <div
-                className="rounded-xl p-4"
-                style={{
-                  background: isRunning ? "rgba(0,255,136,0.05)" : "rgba(255,51,102,0.05)",
-                  border: `1px solid ${isRunning ? "rgba(0,255,136,0.2)" : "rgba(255,51,102,0.2)"}`,
-                }}
-              >
-                <div className="flex items-center gap-2 mb-3">
-                  <span
-                    className="pulse-dot w-2.5 h-2.5 rounded-full"
-                    style={{ background: isRunning ? "#00ff88" : "#ff3366" }}
-                  />
-                  <span
-                    className="text-xs font-bold uppercase tracking-wider"
-                    style={{ color: isRunning ? "#00ff88" : "#ff3366" }}
-                  >
-                    Sentinel {isRunning ? "Active" : "Stopped"}
-                  </span>
-                </div>
-                <div className="grid grid-cols-2 gap-2 text-xs">
-                  <div>
-                    <p className="text-slate-500">Packets Caught</p>
-                    <p className="text-slate-200 font-semibold">{sniffer?.packets_captured?.toLocaleString() ?? "—"}</p>
-                  </div>
-                  <div>
-                    <p className="text-slate-500">Alerts</p>
-                    <p className="text-yellow-400 font-semibold">{triage?.packets_flagged?.toLocaleString() ?? "—"}</p>
-                  </div>
-                </div>
+          {/* Queue meters */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <div>
+              <div style={{ display: "flex", justifyContent: "space-between", fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-muted)", marginBottom: 4 }}>
+                <span>PACKET QUEUE</span><span style={{ color: "var(--neon-blue)" }}>{pqSize}/{pqMax}</span>
               </div>
-
-              {/* Interface selector */}
-              <div>
-                <label className="flex items-center gap-1.5 text-xs text-slate-400 mb-2 font-semibold uppercase tracking-wider">
-                  <Network size={12} />
-                  Network Interface
-                </label>
-                <select
-                  value={selectedIface}
-                  onChange={(e) => setSelectedIface(e.target.value)}
-                  className="w-full rounded-lg px-3 py-2 text-sm text-slate-200 outline-none"
-                  style={{
-                    background: "rgba(0,212,255,0.06)",
-                    border: "1px solid rgba(0,212,255,0.2)",
-                  }}
-                >
-                  {interfaces.map((iface) => (
-                    <option key={iface} value={iface} style={{ background: "#070d1a" }}>
-                      {iface}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Start/Stop buttons */}
-              <div className="grid grid-cols-2 gap-3">
-                <motion.button
-                  onClick={handleStart}
-                  disabled={isRunning || isStarting}
-                  whileHover={{ scale: 1.03 }}
-                  whileTap={{ scale: 0.97 }}
-                  className="flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-bold transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-                  style={{
-                    background: "linear-gradient(135deg, rgba(0,255,136,0.2), rgba(0,255,136,0.1))",
-                    border: "1px solid rgba(0,255,136,0.4)",
-                    color: "#00ff88",
-                  }}
-                >
-                  <Play size={14} />
-                  {isStarting ? "Starting…" : "Start"}
-                </motion.button>
-                <motion.button
-                  onClick={handleStop}
-                  disabled={!isRunning || isStopping}
-                  whileHover={{ scale: 1.03 }}
-                  whileTap={{ scale: 0.97 }}
-                  className="flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-bold transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-                  style={{
-                    background: "linear-gradient(135deg, rgba(255,51,102,0.2), rgba(255,51,102,0.1))",
-                    border: "1px solid rgba(255,51,102,0.4)",
-                    color: "#ff3366",
-                  }}
-                >
-                  <Square size={14} />
-                  {isStopping ? "Stopping…" : "Stop"}
-                </motion.button>
-              </div>
-
-              {/* Queue fill */}
-              <div>
-                <div className="flex justify-between items-center mb-2">
-                  <span className="flex items-center gap-1.5 text-xs text-slate-400 font-semibold uppercase tracking-wider">
-                    <Activity size={12} />
-                    Queue Utilization
-                  </span>
-                  <span className="text-xs font-bold" style={{ color: qFill > 80 ? "#ff3366" : qFill > 50 ? "#ffd700" : "#00ff88" }}>
-                    {qFill.toFixed(1)}%
-                  </span>
-                </div>
-                <div className="h-2 rounded-full overflow-hidden" style={{ background: "rgba(100,116,139,0.2)" }}>
-                  <motion.div
-                    className="h-full rounded-full"
-                    style={{
-                      background:
-                        qFill > 80
-                          ? "linear-gradient(90deg, #ff3366, #ff0000)"
-                          : qFill > 50
-                          ? "linear-gradient(90deg, #ffd700, #ff9900)"
-                          : "linear-gradient(90deg, #00d4ff, #00ff88)",
-                    }}
-                    animate={{ width: `${qFill}%` }}
-                    transition={{ duration: 0.5 }}
-                  />
-                </div>
-                <p className="text-xs text-slate-600 mt-1">
-                  {status?.queues?.packet_queue_size ?? 0} / {status?.queues?.packet_queue_max ?? 0} packets
-                </p>
-              </div>
-
-              {/* Manual packet analyzer */}
-              <div>
-                <label className="flex items-center gap-1.5 text-xs text-slate-400 mb-2 font-semibold uppercase tracking-wider">
-                  <Search size={12} />
-                  Manual Packet Analyzer
-                </label>
-                <textarea
-                  value={packetInput}
-                  onChange={(e) => setPacketInput(e.target.value)}
-                  placeholder="Paste packet data or description…"
-                  rows={3}
-                  className="w-full rounded-lg px-3 py-2 text-xs text-slate-300 outline-none resize-none"
-                  style={{
-                    background: "rgba(0,212,255,0.05)",
-                    border: "1px solid rgba(0,212,255,0.15)",
-                    fontFamily: "monospace",
-                  }}
-                />
-                <button
-                  onClick={handleAnalyze}
-                  className="mt-2 w-full py-2 rounded-lg text-xs font-bold transition-all"
-                  style={{
-                    background: "linear-gradient(135deg, rgba(168,85,247,0.2), rgba(168,85,247,0.1))",
-                    border: "1px solid rgba(168,85,247,0.4)",
-                    color: "#a855f7",
-                  }}
-                >
-                  Analyze with AI
-                </button>
-                {analyzeResult && (
-                  <div
-                    className="mt-2 rounded-lg p-3 text-xs text-slate-300 leading-relaxed"
-                    style={{ background: "rgba(168,85,247,0.05)", border: "1px solid rgba(168,85,247,0.15)" }}
-                  >
-                    {analyzeResult}
-                  </div>
-                )}
+              <div style={{ height: 4, borderRadius: 2, background: "rgba(0,212,255,0.08)" }}>
+                <div style={{ width: `${Math.min(100, (pqSize / pqMax) * 100)}%`, height: "100%", borderRadius: 2, background: "var(--neon-blue)", transition: "width 0.5s" }} />
               </div>
             </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Backdrop */}
-      <AnimatePresence>
-        {isOpen && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-20"
-            style={{ background: "rgba(0,0,0,0.4)" }}
-            onClick={() => setIsOpen(false)}
-          />
-        )}
-      </AnimatePresence>
+            <div>
+              <div style={{ display: "flex", justifyContent: "space-between", fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-muted)", marginBottom: 4 }}>
+                <span>LLM QUEUE</span><span style={{ color: "var(--neon-purple)" }}>{lqSize}/{lqMax}</span>
+              </div>
+              <div style={{ height: 4, borderRadius: 2, background: "rgba(168,85,247,0.08)" }}>
+                <div style={{ width: `${Math.min(100, (lqSize / lqMax) * 100)}%`, height: "100%", borderRadius: 2, background: "var(--neon-purple)", transition: "width 0.5s" }} />
+              </div>
+            </div>
+          </div>
+        </motion.div>
+      )}
     </>
   );
 }
