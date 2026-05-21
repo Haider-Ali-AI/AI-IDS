@@ -126,9 +126,9 @@ export default function HeroGlobe() {
               if (globeEl.current) {
                 const globeMaterial = globeEl.current.globeMaterial();
                 if (globeMaterial) {
-                  globeMaterial.color = new THREE.Color("#00122a");
-                  globeMaterial.emissive = new THREE.Color("#00d4ff");
-                  globeMaterial.emissiveIntensity = 0.15;
+                  globeMaterial.color = new THREE.Color("#00d4ff"); // Cyan tint on land
+                  globeMaterial.emissive = new THREE.Color("#00122a"); // Dark base
+                  globeMaterial.emissiveIntensity = 0.5;
                 }
               }
             } catch (e) {

@@ -3,12 +3,14 @@
 import useSWR from "swr";
 import { fetcher, SystemStatus } from "@/lib/api";
 
-export function useSystemStatus() {
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+
+export function useSystemStatus(refreshInterval = 3000) {
   const { data, error, isLoading } = useSWR<SystemStatus>(
-    "/api/proxy/status",
+    `${API_URL}/status`,
     fetcher,
     {
-      refreshInterval: 3000,
+      refreshInterval,
       revalidateOnFocus: false,
       errorRetryCount: 3,
     }

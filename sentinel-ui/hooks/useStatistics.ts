@@ -3,9 +3,11 @@
 import useSWR from "swr";
 import { fetcher, Statistics } from "@/lib/api";
 
-export function useStatistics() {
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+
+export function useStatistics(refreshInterval = 2000) {
   const { data, error, isLoading } = useSWR<Statistics>(
-    "/api/proxy/statistics",
+    `${API_URL}/statistics`,
     fetcher,
     {
       refreshInterval: 5000,

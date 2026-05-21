@@ -4,8 +4,8 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import useSWR from "swr";
 import { fetcher, Alert } from "@/lib/api";
 
-const WS_BASE =
-  process.env.NEXT_PUBLIC_WS_BASE ?? "ws://localhost:8000";
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+const WS_BASE = API_URL.replace("http://", "ws://").replace("https://", "wss://");
 
 export function useAlerts(limit = 50) {
   const [wsAlerts, setWsAlerts] = useState<Alert[]>([]);
@@ -14,7 +14,7 @@ export function useAlerts(limit = 50) {
 
   // Initial load via SWR
   const { data: initialAlertsData } = useSWR<{ alerts: Alert[] }>(
-    `/api/proxy/alerts?limit=${limit}`,
+    `${API_URL}/alerts?limit=${limit}`,
     fetcher,
     { revalidateOnFocus: false, shouldRetryOnError: false }
   );
