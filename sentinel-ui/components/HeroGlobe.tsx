@@ -3,6 +3,7 @@
 import { useEffect, useState, useRef } from "react";
 import dynamic from "next/dynamic";
 import { motion } from "framer-motion";
+import * as THREE from "three";
 
 // Dynamically import react-globe.gl to avoid SSR issues with canvas/window
 const Globe = dynamic(() => import("react-globe.gl"), { ssr: false });
@@ -68,6 +69,12 @@ export default function HeroGlobe() {
       globeEl.current.controls().enableZoom = false;
       // Position the camera slightly further back
       globeEl.current.pointOfView({ altitude: 2.2 }, 0);
+      
+      // Apply neon cyber theme to the globe material
+      const globeMaterial = globeEl.current.globeMaterial();
+      globeMaterial.color = new THREE.Color("#00122a");
+      globeMaterial.emissive = new THREE.Color("#00d4ff");
+      globeMaterial.emissiveIntensity = 0.15;
     }
   }, [globeEl.current, dimensions.width]);
 
@@ -114,6 +121,10 @@ export default function HeroGlobe() {
           globeImageUrl="//unpkg.com/three-globe/example/img/earth-dark.jpg"
           bumpImageUrl="//unpkg.com/three-globe/example/img/earth-topology.png"
           backgroundColor="rgba(0,0,0,0)"
+
+          // Neon Glow Atmosphere
+          atmosphereColor="#00d4ff"
+          atmosphereAltitude={0.2}
 
           // Attackers & User points
           pointsData={pointsData}
