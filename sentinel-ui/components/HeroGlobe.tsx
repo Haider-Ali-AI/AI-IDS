@@ -15,6 +15,15 @@ export default function HeroGlobe() {
   
   const [userPos, setUserPos] = useState<{ lat: number; lng: number } | null>(null);
   const [locationLabel, setLocationLabel] = useState<string>("Locating…");
+  const [countries, setCountries] = useState({ features: [] });
+
+  // Fetch GeoJSON for the continental hex map
+  useEffect(() => {
+    fetch("https://raw.githubusercontent.com/vasturiano/react-globe.gl/master/example/datasets/ne_110m_admin_0_countries.geojson")
+      .then((res) => res.json())
+      .then(setCountries)
+      .catch((err) => console.error("Failed to load globe GeoJSON", err));
+  }, []);
 
   // Keep globe container fully responsive
   useEffect(() => {
@@ -111,10 +120,16 @@ export default function HeroGlobe() {
           width={dimensions.width}
           height={dimensions.height}
           
-          // Realistic blue earth map with topography to match cyan theme
-          globeImageUrl="//unpkg.com/three-globe/example/img/earth-blue-marble.jpg"
-          bumpImageUrl="//unpkg.com/three-globe/example/img/earth-topology.png"
+          // Base globe without image texture (solid dark color)
+          showGlobe={true}
           backgroundColor="rgba(0,0,0,0)"
+
+          // Continental Hex Outlines
+          hexPolygonsData={countries.features}
+          hexPolygonResolution={3}
+          hexPolygonMargin={0.3}
+          hexPolygonColor={() => "#00d4ff"}
+          hexPolygonAltitude={0.015}
 
           // Neon Glow Atmosphere
           atmosphereColor="#00d4ff"
@@ -126,9 +141,10 @@ export default function HeroGlobe() {
               if (globeEl.current) {
                 const globeMaterial = globeEl.current.globeMaterial();
                 if (globeMaterial) {
-                  globeMaterial.color = new THREE.Color("#00d4ff"); // Cyan tint on land
-                  globeMaterial.emissive = new THREE.Color("#00122a"); // Dark base
-                  globeMaterial.emissiveIntensity = 0.5;
+                  globeMaterial.color = new THREE.Color("#000a18"); // Deep dark core
+                  globeMaterial.emissive = new THREE.Color("#000000"); 
+                  globeMaterial.transparent = true;
+                  globeMaterial.opacity = 0.8;
                 }
               }
             } catch (e) {
