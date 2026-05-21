@@ -13,6 +13,7 @@ async function request<T>(
       ...options,
       headers: {
         "Content-Type": "application/json",
+        "ngrok-skip-browser-warning": "true",
         ...(options?.headers ?? {}),
       },
     });
@@ -105,7 +106,7 @@ export interface Statistics {
 
 // ── Fetcher (for SWR) ─────────────────────────────────────────────────────
 
-export const fetcher = (url: string) => fetch(url).then((r) => r.json());
+export const fetcher = (url: string) => fetch(url, { headers: { "ngrok-skip-browser-warning": "true" } }).then((r) => r.json());
 
 // ── API calls ─────────────────────────────────────────────────────────────
 

@@ -111,8 +111,8 @@ export default function HeroGlobe() {
           width={dimensions.width}
           height={dimensions.height}
           
-          // Realistic dark earth map with topography
-          globeImageUrl="//unpkg.com/three-globe/example/img/earth-dark.jpg"
+          // Realistic blue earth map with topography to match cyan theme
+          globeImageUrl="//unpkg.com/three-globe/example/img/earth-blue-marble.jpg"
           bumpImageUrl="//unpkg.com/three-globe/example/img/earth-topology.png"
           backgroundColor="rgba(0,0,0,0)"
 
