@@ -2,8 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-
-const API = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+import { backendGet } from "@/lib/backend";
 
 function badge(level: string) {
   const l = (level || "").toLowerCase();
@@ -41,19 +40,18 @@ export default function AlertFeed() {
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [expanded, setExpanded] = useState<number | null>(null);
   const [filter, setFilter] = useState("All");
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const poll = async () => {
       try {
-        const r = await fetch(`${API}/alerts?limit=60`);
-        if (r.ok) {
-          const d = await r.json();
-          setAlerts(d.alerts || []);
-        }
+        const d = await backendGet<{ alerts: Alert[] }>("/alerts?limit=60");
+        setAlerts(d.alerts || []);
       } catch {}
+      setLoading(false);
     };
     poll();
-    const id = setInterval(poll, 3000);
+    const id = setInterval(poll, 2000);
     return () => clearInterval(id);
   }, []);
 
@@ -86,7 +84,14 @@ export default function AlertFeed() {
       {/* Alert rows */}
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
         <AnimatePresence>
-          {filtered.length === 0 ? (
+          {loading ? (
+            <motion.div
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+              style={{ padding: "3rem", textAlign: "center", color: "var(--text-muted)", fontFamily: "var(--font-mono)", fontSize: 13 }}
+            >
+              ⟨ CONNECTING TO SENTINEL BACKEND… ⟩
+            </motion.div>
+          ) : filtered.length === 0 ? (
             <motion.div
               initial={{ opacity: 0 }} animate={{ opacity: 1 }}
               style={{ padding: "3rem", textAlign: "center", color: "var(--text-muted)", fontFamily: "var(--font-mono)", fontSize: 13 }}

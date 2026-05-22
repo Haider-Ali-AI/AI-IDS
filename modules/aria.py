@@ -6,8 +6,9 @@
 """
 
 import json
+import asyncio
 import logging
-from typing import List, Dict, Any, AsyncGenerator
+from typing import AsyncGenerator, List, Dict, Any
 
 from google import genai
 from google.genai import types
@@ -15,6 +16,8 @@ from google.genai import types
 from config import settings
 
 logger = logging.getLogger("ids.aria")
+
+_GEMINI_EXHAUSTED = False
 
 ARIA_SYSTEM_PROMPT = """You are ARIA (Autonomous Response Intelligence Analyst), an elite AI-powered SOC analyst embedded in a real-time cybersecurity platform.
 
@@ -93,10 +96,11 @@ class ARIAAgent:
 
         return "\n\n".join(context_parts)
 
-    async def stream_chat(self, message: str, history: List[Dict[str, str]]) -> AsyncGenerator[str, None]:
-        """
-        Stream a response from Gemini, given the user message and history.
-        """
+    async def stream_chat(self, message: str, history: List[Dict[str, str]] = None) -> AsyncGenerator[str, None]:
+        """Stream an analysis response from ARIA."""
+        history = history or []
+        global _GEMINI_EXHAUSTED
+        
         try:
             # 1. Build context
             system_context = await self._gather_context(message)
@@ -122,13 +126,13 @@ class ARIAAgent:
                 temperature=0.3,
             )
 
-        # If we previously hit the Gemini rate limit, jump straight to Groq
-        if getattr(settings, "gemini_exhausted", False) and settings.groq_api_key:
-            async for chunk in self._stream_groq(message, history, full_system_instruction):
-                yield chunk
-            return
+            # If we previously hit the Gemini rate limit, jump straight to Groq
+            global _GEMINI_EXHAUSTED
+            if _GEMINI_EXHAUSTED and settings.groq_api_key:
+                async for chunk in self._stream_groq(message, history, full_system_instruction):
+                    yield chunk
+                return
 
-        try:
             # 3. Call streaming API
             response = await self.client.aio.models.generate_content_stream(
                 model=self.model_name,
@@ -143,7 +147,7 @@ class ARIAAgent:
         except Exception as e:
             if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
                 # Permanently exhaust Gemini for this session
-                setattr(settings, "gemini_exhausted", True)
+                _GEMINI_EXHAUSTED = True
                 
                 if settings.groq_api_key:
                     try:
@@ -155,6 +159,10 @@ class ARIAAgent:
                         logger.error(f"ARIA Groq fallback error: {groq_e}")
                         yield f"\n\n**System Error:** Groq fallback failed. Details: {str(groq_e)}"
                         return
+
+            logger.error(f"ARIA stream error: {e}", exc_info=True)
+            yield f"**System Error:** I am currently experiencing technical difficulties. Details: {str(e)}"
+            
     async def _stream_groq(self, message: str, history: List[Dict[str, str]], full_system_instruction: str) -> AsyncGenerator[str, None]:
         from groq import AsyncGroq
         groq_client = AsyncGroq(api_key=settings.groq_api_key)
@@ -173,6 +181,3 @@ class ARIAAgent:
         async for chunk in completion:
             if chunk.choices and chunk.choices[0].delta.content:
                 yield chunk.choices[0].delta.content
-
-            logger.error(f"ARIA stream error: {e}", exc_info=True)
-            yield f"**System Error:** I am currently experiencing technical difficulties. Details: {str(e)}"

@@ -2,8 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
-
-const API = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+import { BACKEND, backendGet } from "@/lib/backend";
 
 interface Status {
   sniffer?: { is_running?: boolean; packets_captured?: number };
@@ -36,13 +35,15 @@ export default function StatusBar() {
   useEffect(() => {
     const poll = async () => {
       try {
-        const r = await fetch(`${API}/status`);
-        if (r.ok) { setStatus(await r.json()); setApiOnline(true); }
-        else setApiOnline(false);
-      } catch { setApiOnline(false); }
+        const data = await backendGet<Status>("/status");
+        setStatus(data);
+        setApiOnline(true);
+      } catch {
+        setApiOnline(false);
+      }
     };
     poll();
-    const id = setInterval(poll, 4000);
+    const id = setInterval(poll, 3000);
     return () => clearInterval(id);
   }, []);
 
@@ -62,7 +63,7 @@ export default function StatusBar() {
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <Pill label={apiOnline ? "API ONLINE" : "API OFFLINE"} active={apiOnline} />
           <Pill label={snifferOn ? "SNIFFER ACTIVE" : "SNIFFER IDLE"} active={!!snifferOn} />
-          <Pill label={llmOn ? "GEMINI ACTIVE" : "GEMINI IDLE"} active={!!llmOn} />
+          <Pill label={llmOn ? "LLM ACTIVE" : "LLM IDLE"} active={!!llmOn} />
           <Pill label={ragOn ? "RAG LOADED" : "RAG OFFLINE"} active={!!ragOn} warning={!ragOn} />
           <Pill label={dbOn ? "DB CONNECTED" : "DB ERROR"} active={!!dbOn} />
         </div>

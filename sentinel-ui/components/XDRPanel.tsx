@@ -2,8 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-
-const API = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+import { backendGet, backendPost } from "@/lib/backend";
 
 interface Chain {
   chain_id: string;
@@ -49,8 +48,8 @@ export default function XDRPanel() {
   useEffect(() => {
     const poll = async () => {
       try {
-        const r1 = await fetch(`${API}/chains`);
-        if (r1.ok) { const d = await r1.json(); setChains(d.chains || []); }
+        const d = await backendGet<{ chains: Chain[] }>("/chains");
+        setChains(d.chains || []);
       } catch {}
     };
     poll();
@@ -61,11 +60,8 @@ export default function XDRPanel() {
   const generateReport = async (chainId: string) => {
     setLoadingReport(chainId);
     try {
-      const r = await fetch(`${API}/api/chronicle/${chainId}`, { method: "POST" });
-      if (r.ok) {
-        const d = await r.json();
-        setChronicle(prev => ({ ...prev, [chainId]: d.executive_summary || "Report generated." }));
-      }
+      const d = await backendPost<{ executive_summary: string }>(`/api/chronicle/${chainId}`, {});
+      setChronicle(prev => ({ ...prev, [chainId]: d.executive_summary || "Report generated." }));
     } catch {}
     setLoadingReport(null);
   };

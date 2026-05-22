@@ -2,8 +2,7 @@
 
 import { useEffect, useState, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-
-const API = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+import { backendStream } from "@/lib/backend";
 
 interface Msg { role: "user" | "assistant"; content: string; }
 
@@ -28,34 +27,29 @@ export default function ChatPanel() {
     setMessages(prev => [...prev, { role: "user", content: msg }]);
     setStreaming(true);
 
-    // Add empty assistant message for streaming
+    // Add empty assistant placeholder
     setMessages(prev => [...prev, { role: "assistant", content: "" }]);
 
     try {
-      const res = await fetch(`${API}/api/aria/chat`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: msg, history })
-      });
-      if (!res.body) throw new Error("No body");
-      const reader = res.body.getReader();
+      // Use backendStream which bakes in the ngrok header
+      const body = await backendStream("/api/aria/chat", { message: msg, history });
+      const reader = body.getReader();
       const decoder = new TextDecoder();
       let full = "";
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-        const chunk = decoder.decode(value, { stream: true });
-        full += chunk;
+        full += decoder.decode(value, { stream: true });
         setMessages(prev => {
           const next = [...prev];
           next[next.length - 1] = { role: "assistant", content: full };
           return next;
         });
       }
-    } catch (e) {
+    } catch {
       setMessages(prev => {
         const next = [...prev];
-        next[next.length - 1] = { role: "assistant", content: "⚠ Could not reach ARIA. Is the backend running?" };
+        next[next.length - 1] = { role: "assistant", content: "⚠ Could not reach ARIA. Is the backend running and ngrok active?" };
         return next;
       });
     }
@@ -115,7 +109,8 @@ export default function ChatPanel() {
                     style={{
                       maxWidth: "85%", padding: "8px 12px",
                       fontSize: 12, lineHeight: 1.6,
-                      color: m.role === "user" ? "var(--neon-blue)" : "#cbd5e1"
+                      color: m.role === "user" ? "var(--neon-blue)" : "#cbd5e1",
+                      whiteSpace: "pre-wrap"
                     }}
                   >
                     {m.content || (streaming && i === messages.length - 1 ? (

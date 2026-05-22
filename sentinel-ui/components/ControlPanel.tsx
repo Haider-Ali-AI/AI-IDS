@@ -2,14 +2,12 @@
 
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-
-const API = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+import { backendGet, backendPost } from "@/lib/backend";
 
 interface SystemStatus {
   sniffer?: { is_running?: boolean; interface?: string };
   llm_analyzer?: { analyzed_count?: number; error_count?: number };
   queues?: { packet_queue_size?: number; packet_queue_max?: number; llm_queue_size?: number; llm_queue_max?: number };
-  counts?: { total?: number; critical?: number; high?: number };
 }
 
 export default function ControlPanel() {
@@ -21,16 +19,13 @@ export default function ControlPanel() {
 
   const fetchStatus = async () => {
     try {
-      const r = await fetch(`${API}/status`);
-      if (r.ok) setStatus(await r.json());
+      const data = await backendGet<SystemStatus>("/status");
+      setStatus(data);
     } catch {}
     try {
-      const r = await fetch(`${API}/interfaces`);
-      if (r.ok) {
-        const d = await r.json();
-        setInterfaces(d.interfaces || ["Wi-Fi"]);
-        setSelected(d.current || "Wi-Fi");
-      }
+      const d = await backendGet<{ interfaces: string[]; current: string }>("/interfaces");
+      setInterfaces(d.interfaces?.length ? d.interfaces : ["Wi-Fi"]);
+      if (d.current) setSelected(d.current);
     } catch {}
   };
 
@@ -43,11 +38,7 @@ export default function ControlPanel() {
   const toggleSniffer = async () => {
     setToggling(true);
     try {
-      await fetch(`${API}/toggle-sniffing`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ interface: selected })
-      });
+      await backendPost("/toggle-sniffing", { interface: selected });
       await fetchStatus();
     } catch {}
     setToggling(false);
